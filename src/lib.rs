@@ -17,6 +17,9 @@ pub struct AppState {
     pub cwd: PathBuf,
     pub scan_depth: usize,
     pub commits_per_repo: usize,
+    /// Seconds between periodic background refreshes. `0` disables the
+    /// periodic task; the dashboard hides the countdown in that case.
+    pub refresh_interval_secs: u64,
     pub progress_tx: broadcast::Sender<String>,
     pub refresh_lock: Arc<Mutex<()>>,
     pub last_scan: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,

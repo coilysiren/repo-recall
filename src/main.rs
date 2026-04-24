@@ -57,11 +57,17 @@ async fn main() -> anyhow::Result<()> {
     };
     let my_git_email = detect_my_git_email();
 
+    let refresh_interval_secs: u64 = std::env::var("REPO_RECALL_REFRESH_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(150);
+
     let state = AppState {
         db_path,
         cwd,
         scan_depth,
         commits_per_repo,
+        refresh_interval_secs,
         progress_tx,
         refresh_lock: Arc::new(Mutex::new(())),
         last_scan: Arc::new(Mutex::new(None)),
@@ -84,10 +90,6 @@ async fn main() -> anyhow::Result<()> {
     // Periodic refresh: fires every REPO_RECALL_REFRESH_INTERVAL_SECS. Set to
     // 0 to disable. Uses the same `refresh_lock` as the manual /refresh, so a
     // tick that overlaps an in-flight scan no-ops cleanly.
-    let refresh_interval_secs: u64 = std::env::var("REPO_RECALL_REFRESH_INTERVAL_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(150);
     if refresh_interval_secs > 0 {
         tracing::info!("periodic refresh: every {refresh_interval_secs}s");
         let state = state.clone();

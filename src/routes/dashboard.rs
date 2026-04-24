@@ -158,6 +158,7 @@ pub async fn index(
                 div class="text-[11px] uppercase tracking-[0.08em] text-[#9e9fc2] font-bold" { "last scan" }
                 div class="text-sm text-[#574f7d] mt-1 font-mono" { (last_scan_str) }
             }
+            (next_refresh_countdown(state.refresh_interval_secs, last_scan))
             (author_toggle(my_email.as_deref(), filter_label.as_deref()))
             form method="post" action="/refresh" hx-post="/refresh" hx-swap="none" {
                 button type="submit"
@@ -410,6 +411,62 @@ fn author_toggle(my_email: Option<&str>, active: Option<&str>) -> Markup {
                 "me"
             }
         }
+    }
+}
+
+/// Countdown to the next auto-refresh tick. Server-side renders the initial
+/// label + a `data-deadline-unix` attribute; static/refresh-countdown.js
+/// decrements the visible text once a second. Hidden when periodic refresh
+/// is disabled (`REPO_RECALL_REFRESH_INTERVAL_SECS=0`). Before the first scan
+/// completes (`last_scan = None`) we don't know the anchor, so we show
+/// "scanning…" with no deadline.
+fn next_refresh_countdown(
+    interval_secs: u64,
+    last_scan: Option<chrono::DateTime<chrono::Utc>>,
+) -> Markup {
+    if interval_secs == 0 {
+        return html! {};
+    }
+    let label_class = "text-[11px] uppercase tracking-[0.08em] text-[#9e9fc2] font-bold";
+    let value_class = "text-sm text-[#574f7d] mt-1 font-mono";
+    let Some(scan) = last_scan else {
+        return html! {
+            div {
+                div class=(label_class) { "next refresh" }
+                div class=(value_class) { "scanning…" }
+            }
+        };
+    };
+    let deadline = scan.timestamp() + interval_secs as i64;
+    html! {
+        div {
+            div class=(label_class) {
+                "next refresh"
+                span class="ml-1 lowercase tracking-normal font-normal text-[#574f7d]/60" {
+                    "(every " (format_secs(interval_secs)) ")"
+                }
+            }
+            div id="next-refresh-countdown"
+                class=(value_class)
+                data-deadline-unix=(deadline) {
+                "—"
+            }
+        }
+        script src="/static/refresh-countdown.js" defer {}
+    }
+}
+
+/// Compact "1m 30s" / "30s" / "2m" formatting for short durations.
+fn format_secs(s: u64) -> String {
+    if s < 60 {
+        return format!("{s}s");
+    }
+    let m = s / 60;
+    let r = s % 60;
+    if r == 0 {
+        format!("{m}m")
+    } else {
+        format!("{m}m {r}s")
     }
 }
 
