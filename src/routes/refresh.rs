@@ -254,7 +254,7 @@ async fn ingest_content_mentions(state: AppState) -> usize {
                 )?;
                 inserted += n;
             }
-            if (i + 1).is_multiple_of(25) || i + 1 == total {
+            if (i + 1) % 25 == 0 || i + 1 == total {
                 let _ = tx.send(status_fragment(&format!(
                     "scanning sessions for repo mentions… {}/{}",
                     i + 1,
@@ -375,7 +375,7 @@ async fn ingest_ci_status(state: AppState) -> usize {
         if let Ok(Some(snap)) = res {
             results.push(snap);
         }
-        if done.is_multiple_of(10) || done == total {
+        if done % 10 == 0 || done == total {
             let _ = tx.send(status_fragment(&format!("remote state… {done}/{total}")));
         }
     }
