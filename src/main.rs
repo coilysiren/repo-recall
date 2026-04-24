@@ -81,6 +81,32 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Periodic refresh: fires every REPO_RECALL_REFRESH_INTERVAL_SECS. Set to
+    // 0 to disable. Uses the same `refresh_lock` as the manual /refresh, so a
+    // tick that overlaps an in-flight scan no-ops cleanly.
+    let refresh_interval_secs: u64 = std::env::var("REPO_RECALL_REFRESH_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(600);
+    if refresh_interval_secs > 0 {
+        tracing::info!("periodic refresh: every {refresh_interval_secs}s");
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(refresh_interval_secs));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            ticker.tick().await; // skip the immediate first tick — initial scan covers it
+            loop {
+                ticker.tick().await;
+                if let Err(e) = routes::refresh::run_refresh(state.clone()).await {
+                    tracing::error!("periodic refresh failed: {e:?}");
+                }
+            }
+        });
+    } else {
+        tracing::info!("periodic refresh disabled (REPO_RECALL_REFRESH_INTERVAL_SECS=0)");
+    }
+
     let app: Router = routes::router(state.clone());
 
     let port: u16 = std::env::var("REPO_RECALL_PORT")

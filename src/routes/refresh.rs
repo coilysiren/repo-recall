@@ -375,7 +375,7 @@ async fn ingest_ci_status(state: AppState) -> usize {
         if let Ok(Some(snap)) = res {
             results.push(snap);
         }
-        if done % 10 == 0 || done == total {
+        if done.is_multiple_of(10) || done == total {
             let _ = tx.send(status_fragment(&format!("remote state… {done}/{total}")));
         }
     }
