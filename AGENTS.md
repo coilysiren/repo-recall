@@ -18,18 +18,22 @@ Everything runs locally and bound to `127.0.0.1` only. No telemetry, no auth. Th
 ```
 src/
   main.rs           # entry point; reads env, bootstraps state, runs initial scan
+  lib.rs            # AppState + shared types (keeps main.rs thin and tests importable)
   db.rs             # SQLite schema + queries (wipe-and-rebuild on every refresh)
   scanner.rs        # repo discovery: walk cwd + REPO_RECALL_DEPTH levels for .git entries
   sessions.rs       # data source #1: parse Claude Code JSONL session files
   commits.rs        # data source #2: shell out to `git log`, NUL-separated
   join.rs           # cwd -> repo matching (longest-prefix wins)
+  activity.rs       # activity scoring + attribute categories (Historical / LocalState / RemoteState)
   routes/
     mod.rs          # router wiring + ServeDir for /static/*
     dashboard.rs    # GET /
     repos.rs        # GET /repos/{id}
     sessions.rs     # GET /sessions/{id}
+    search.rs       # GET /search
     refresh.rs      # POST /refresh (kicks off async scan+index)
     ws.rs           # GET /ws (progress broadcast), GET /livereload (dev reload)
+    fallback.rs     # 404 handler
     templates.rs    # maud layout + reusable Tailwind class bundles (PANEL, PILL, ...)
 static/
   style.css         # small overrides on top of Tailwind (scrollbar, body font)
@@ -72,14 +76,14 @@ Browser auto-reload: every page includes a small script that opens a WebSocket t
 ## Conventions
 
 - **SQLite is a cache, not a database.** The schema is wiped and recreated on every process start. No migrations, no `INSERT OR REPLACE` heroics, no stale-state bugs. If you need to change the schema, change it in [`src/db.rs`](./src/db.rs) and restart. On refresh, the tables are truncated and rebuilt from scratch.
-- **Discovery is lazy.** No config file, no root-dir setting. The server walks its cwd + two levels deep. If you want it to index a different tree, run it there (or set `REPO_RECALL_CWD`).
+- **Discovery is lazy.** No config file, no root-dir setting. The server walks its cwd + `REPO_RECALL_DEPTH` levels deep (default 4). If you want it to index a different tree, run it there (or set `REPO_RECALL_CWD`).
 - **`session_repos.match_type` is the extension point.** MVP writes only `'cwd'`. Additional signals (file paths touched in a session, branch-name matches, etc.) go in as new rows with new `match_type` values — don't replace the `cwd` row, add to it.
 - **DB access uses `spawn_blocking` + a fresh `rusqlite::Connection` per task.** rusqlite is sync; SQLite handles concurrent readers via WAL. Don't introduce an `Arc<Mutex<Connection>>` — it serializes request handling during long scans.
 - **Integration tests boot the real router on port 0.** See [`tests/smoke.rs`](./tests/smoke.rs). Each test gets its own SQLite file under `$TMPDIR` (nanos + PID + an atomic counter) so parallel `cargo test` invocations don't collide. Prefer adding tests here over writing manual-curl README snippets.
 - **Session parsing tolerates malformed lines.** Individual JSONL lines can be skipped with a `tracing::debug!` log; don't fail a whole file because one line is bad. The parser already handles the mix of `queue-operation` / `user` / `assistant` record shapes we've seen.
 - **Data sources are independent tables, not a single unified "events" table.** Sessions live in `sessions` + `session_repos`, commits live in `commits`. Both reference `repos.id` but don't join through each other. When future data sources arrive (GitHub PRs, CI runs, etc.) they each get their own table + refresh step. A cross-source "activity feed" is a query-time concern, not a schema-time one — don't pre-unify.
 - **Activity attributes fall into three categories**, declared via [`activity::Category`](./src/activity.rs): **Historical** (past activity, local, cheap), **LocalState** (working tree right now, local, cheap), **RemoteState** (requires a network call to a remote service — GitHub, CI, etc.). Each new attribute picks a category; the category drives *how* it's refreshed (main blocking pass vs. parallel async post-pass) and *how* it's rendered (alert-style pill vs. standard vs. silent-when-healthy).
-- **Activity score uses median-of-non-zero normalisation, not max.** `Σ ln(1 + xᵢ / medianᵢ)`. A single super-active outlier doesn't squash everyone else's contribution — a "typical active repo" scores exactly `ln(2)` per dimension it hits, so the ranking stays readable. Action-required repos (failing CI, dirty tree, in-progress git op, detached HEAD) still hard-sort to the top as a separate bucket, regardless of score.
+- **Activity score is `Σ ln(1 + xᵢ / Mᵢ)`** where `Mᵢ` is the corpus-wide max for each attribute. See the docstring at the top of [`src/activity.rs`](./src/activity.rs) for the full reasoning (breadth-rewarding, diminishing-returns, zero-safe). A repo at peak on every dimension scores `N · ln(2)`. Action-required repos (failing CI, dirty tree, in-progress git op, detached HEAD) hard-sort to the top as a separate bucket, regardless of score.
 - **`is_action_required` is a curated subset of signals, not every local/remote attr.** Only the ones that ought to pull attention: failing CI, dirty working tree, in-progress rebase/merge/cherry-pick/revert/bisect, detached HEAD. Common states (commits ahead/behind, stash present) are shown as informational pills, not urgent ones.
 - **Remote-state refresh runs in a second pass.** The main refresh stays fully local + blocking (runs inside one `spawn_blocking`). Remote-state checks run after, using tokio tasks with a bounded semaphore (8 concurrent) so N network-latency `gh` calls overlap instead of serialising. The UI shows offline data immediately and CI fills in once it lands. Failures are swallowed at `debug!` — `gh` not installed / not authenticated / rate-limited shouldn't break the dashboard.
 - **Git log is shelled out, not linked.** `src/commits.rs` runs `git log --all --no-merges` as a subprocess per repo and parses NUL-separated fields. Reasons: system `git` is everywhere, no libgit2 build pain, one subprocess per repo is cheap. Individual-repo errors are swallowed (logged at `debug!`) rather than aborting the whole scan.
