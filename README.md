@@ -93,13 +93,9 @@ Each source gets its own SQLite table. No unified "events" table — cross-sourc
 
 The 200-char summary can still contain pasted credentials or sensitive text. Treat the SQLite cache as sensitive (it defaults to `$TMPDIR/repo-recall.sqlite`, which most OSes wipe on reboot).
 
-## Scope
-
-MVP deliberately doesn't do: git working-tree file diffs, full GitHub integration (PRs, issues beyond counts), background polling, a menu-bar companion, or redaction of the session summary. See [`SPEC.md`](./SPEC.md) for the full scope, the deferred-feature list, and the reasons each one was cut.
-
 ## Prior art
 
-The MVP is narrow — session ↔ repo joining — but the full spec is a wider dashboard, and most features have prior art worth studying.
+Session ↔ repo joining is the core, but the dashboard sits at the intersection of a few adjacent tools worth studying.
 
 ### Claude Code session browsing
 - **[claude-code-history-viewer](https://github.com/jhlee0409/claude-code-history-viewer)** — desktop app, chat-style transcript rendering, covers Codex / Cursor / Aider / OpenCode too.

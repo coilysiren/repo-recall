@@ -7,7 +7,7 @@
 - *What Claude Code sessions have I had about this repo?*
 - *What repos has this session touched?*
 
-Everything runs locally and bound to `127.0.0.1` only. No telemetry, no network fetches, no auth. See [`SPEC.md`](./SPEC.md) for the full MVP scope and the list of intentionally-deferred features.
+Everything runs locally and bound to `127.0.0.1` only. No telemetry, no auth. The only outbound call is `gh run list` for CI status, best-effort.
 
 - **Language**: Rust (edition 2021, stable toolchain)
 - **Stack**: [axum](https://docs.rs/axum) 0.8 + [tokio](https://tokio.rs) (HTTP + WebSocket), [rusqlite](https://docs.rs/rusqlite) (bundled SQLite), [maud](https://maud.lambda.xyz) (compile-time HTML), [htmx](https://htmx.org) + `htmx-ext-ws` (UI reactivity, loaded from CDN)
@@ -39,7 +39,6 @@ tests/
   smoke.rs          # integration tests: boot the router on port 0, hit every endpoint
 Cargo.toml
 Makefile            # `make help` for the full target list
-SPEC.md             # product spec and deferred-feature list
 .pre-commit-config.yaml
 .github/workflows/ci.yml
 ```
@@ -97,11 +96,10 @@ Claude Code session files can contain code, pasted credentials, and internal dis
 - Writes the SQLite cache to `$TMPDIR` by default, which most OSes wipe on reboot.
 - **Outbound network calls only for the `RemoteState` category.** `gh run list` (for CI status) is the only outbound call today. It reuses the user's existing `gh` auth — we never store tokens. If `gh` isn't installed or authenticated, the remote-state column stays blank; nothing else breaks. Add new remote calls only when a new `RemoteState` attribute genuinely needs them, and keep them best-effort.
 
-The 200-char summary can still leak sensitive content. That's accepted for MVP; a redaction toggle is tracked in [`SPEC.md`](./SPEC.md) as future work.
+The 200-char summary can still leak sensitive content. Redaction is future work.
 
 ## Key references
 
-- [SPEC.md](./SPEC.md) — product spec, data model, deferred features. Read this before proposing new functionality; most "obvious next features" are explicitly deferred and the reasons are worth knowing before re-litigating.
 - [Claude Code session file format](https://docs.claude.com/en/docs/claude-code/settings) — sessions live in `~/.claude/projects/<encoded-project-dir>/*.jsonl`. Each line is an independent JSON record. Record shapes vary: `queue-operation` lines, `user`/`assistant` message lines, etc. `sessions.rs` ignores unknown shapes rather than failing.
 - [htmx WebSocket extension](https://htmx.org/extensions/ws/) — how the server's OOB HTML fragments make it into the DOM without any client JS of our own.
 - [axum 0.8 migration notes](https://github.com/tokio-rs/axum/blob/main/axum/CHANGELOG.md) — path params use `{id}` syntax, not `:id`. This is the most common thing that breaks when copying axum snippets from the internet.
