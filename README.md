@@ -1,11 +1,27 @@
 # repo-recall
 
-A local dev dashboard that indexes your [Claude Code](https://claude.com/claude-code) session history and joins it to the git repos on your disk. Answers two questions:
+> *"Wait — which Claude Code session was the one where I figured out the CI flake?"*
 
-- *What Claude Code sessions have I had about this repo?*
-- *What repos has this session touched?*
+You've got dozens of repos on disk, hundreds of [Claude Code](https://claude.com/claude-code) sessions in `~/.claude/projects/`, and no way to connect the two. repo-recall is a tiny local web app that indexes both and joins them. Two questions, two clicks:
 
-Everything runs on `127.0.0.1`. No network fetches, no auth, no background workers. The server walks its own working directory + two levels deep for `.git` entries, parses `~/.claude/projects/**/*.jsonl`, and matches sessions to repos by their recorded `cwd`.
+- **Which sessions touched this repo?** — open the repo, see every session that had it as `cwd`.
+- **Which repos did this session touch?** — open the session, see every repo it crossed.
+
+Everything is local. The server binds `127.0.0.1` only, the cache lives in `$TMPDIR`, and the only outbound call is `gh run list` for CI status.
+
+![Dashboard — repos, sessions, commits, CI status, uncommitted work](docs/dashboard.png)
+
+## What it actually shows you
+
+**Dashboard** — every repo within N levels of where you launched it, ranked by a composite activity score. Per repo you get: session count, commits in last 30d, LOC churn, unique authors, open PRs/issues, CI status, and any `action-required` signal (failing CI, dirty working tree, mid-rebase). Failures sort to the top regardless of score, so a broken repo you haven't touched in a month still surfaces.
+
+**Repo page** — the 10 hottest files by churn (great for "where's all the thrash actually happening?"), then every Claude Code session that had this repo as its `cwd`.
+
+![Repo page — hottest files, then sessions](docs/repo-detail.png)
+
+**Session page** — metadata (duration, message count, token usage, cost estimate) and a full transcript with collapsible tool calls.
+
+![Session page — metadata and transcript](docs/session-detail.png)
 
 ## Quick start
 
@@ -13,97 +29,91 @@ Everything runs on `127.0.0.1`. No network fetches, no auth, no background worke
 # from the directory you want indexed:
 cargo run
 
-# then open:
+# then:
 open http://127.0.0.1:7777
 ```
 
-### Dev loop with auto-reload
+That's it. No config file, no setup wizard. The server walks its cwd + 4 levels deep for `.git`, parses `~/.claude/projects/**/*.jsonl`, joins them by the session's recorded `cwd`, and ships HTML.
+
+### Dev loop
 
 ```sh
-make install   # one-time: installs cargo-watch and pre-commit hooks
-make watch     # rebuild on source change; browser auto-refreshes via /livereload
-make test      # integration tests (boot the router on a random port and hit it)
-make ci        # fmt --check + clippy + check + test, in order
-make help      # see all targets
+make install   # one-time: cargo-watch + pre-commit hooks
+make watch     # rebuild on save; browser auto-reloads via /livereload
+make test      # integration tests — boot the router on a random port, hit it
+make ci        # fmt --check + clippy + check + test
+make help      # all targets
 ```
 
-Or the raw commands without `make`:
+Under `cargo watch` the binary's cwd is the Cargo project root, so point it at the tree you actually want scanned:
 
 ```sh
-cargo install cargo-watch
-REPO_RECALL_CWD=/path/you/want/indexed cargo watch -w src -w Cargo.toml -w static -x run
+REPO_RECALL_CWD=/path/to/your/code cargo watch -w src -w Cargo.toml -w static -x run
 ```
 
-`REPO_RECALL_CWD` exists because `cargo watch` runs the binary with the Cargo project as its cwd. When you're not using `cargo watch`, just launch from the directory you want scanned.
-
-A `.env` file in the repo root is loaded automatically on startup — drop your `REPO_RECALL_*` overrides there if you don't want to retype them.
+A `.env` in the repo root is loaded automatically — drop your `REPO_RECALL_*` overrides there.
 
 ### Env vars
 
-| Var                | Default                           | Purpose                                                                         |
-|--------------------|-----------------------------------|---------------------------------------------------------------------------------|
-| `REPO_RECALL_PORT` | `7777`                            | HTTP port (always bound to `127.0.0.1`).                                        |
-| `REPO_RECALL_CWD`  | process cwd                       | Directory to scan for repos.                                                    |
-| `REPO_RECALL_DEPTH`| `4`                               | How many directory levels below cwd to walk.                                    |
-| `REPO_RECALL_COMMITS_PER_REPO` | `500`                 | Max commits pulled per repo via `git log --all --no-merges`.                    |
-| `REPO_RECALL_DB`   | `$TMPDIR/repo-recall.sqlite`      | SQLite cache. Dropped and rebuilt every time the server starts.                 |
-| `RUST_LOG`         | `info,repo_recall=debug`          | `tracing-subscriber` filter.                                                    |
+| Var                            | Default                      | Purpose                                                          |
+|--------------------------------|------------------------------|------------------------------------------------------------------|
+| `REPO_RECALL_PORT`             | `7777`                       | HTTP port. Always bound to `127.0.0.1`.                          |
+| `REPO_RECALL_CWD`              | process cwd                  | Directory to scan for repos.                                     |
+| `REPO_RECALL_DEPTH`            | `4`                          | Directory levels below cwd to walk.                              |
+| `REPO_RECALL_COMMITS_PER_REPO` | `500`                        | Max commits pulled per repo via `git log --all --no-merges`.     |
+| `REPO_RECALL_DB`               | `$TMPDIR/repo-recall.sqlite` | SQLite cache. Dropped and rebuilt every startup.                 |
+| `RUST_LOG`                     | `info,repo_recall=debug`     | `tracing-subscriber` filter.                                     |
 
-## How it works
+## How it actually works
 
-- **Repo discovery** — walks cwd up to `REPO_RECALL_DEPTH` levels deep (default 4), stops descending inside repos, skips `node_modules` / `target` / `dist` / `build` / `.venv` / `venv` and hidden dirs. Git worktrees (`.git` as a file) are detected.
-- **Data sources** — repo-recall is designed around several independent data sources, all keyed to the same repo set. Each attribute belongs to one of three categories, which dictates how it's refreshed and how prominently it displays:
-    - **Historical** (past activity, offline, cheap): sessions, commits in the last 30 days, LOC churn, unique authors.
-    - **Current local state** (working tree right now, offline, cheap): untracked + modified file counts, and a sampled list of individual paths for the right column.
-    - **Current remote state** (requires a network call, runs in a parallel post-pass, best-effort): GitHub Actions status on the default branch via `gh run list`. Failing CI surfaces as a prominent pill.
-- **Session history** — each `*.jsonl` under `~/.claude/projects/` is parsed for `sessionId`, first/last timestamps, first user message (as a 200-char summary), message count, and `cwd`. Malformed lines are skipped with a debug log. Sessions are joined to repos when their `cwd` is inside one, via `session_repos.match_type = 'cwd'` — the extension point for richer signals (file paths touched, branch names) as new match types.
-- **Git log** — for each discovered repo, `git log --all --no-merges` is run as a subprocess (NUL-separated format) and up to `REPO_RECALL_COMMITS_PER_REPO` commits are ingested with SHA, author, timestamp, and subject. Individual-repo errors are swallowed at `debug!` rather than aborting the whole scan.
-- **CI status** — a second, async refresh pass runs `gh run list -L 1 --branch <default>` against every GitHub-hosted repo with bounded concurrency (8 in flight). Requires `gh` installed + authenticated; without it, the column quietly stays empty.
-- **Storage** — SQLite is a throwaway cache. On every startup the schema is dropped and recreated; on refresh the rows are wiped and rebuilt. No migrations, no stale-state bugs. Each data source gets its own table (`sessions`, `commits`, …) — a cross-source activity feed is a query-time concern, not a schema-time one.
-- **UI** — server-rendered HTML via [maud](https://maud.lambda.xyz), styled with [Tailwind](https://tailwindcss.com) v4 (loaded via the browser CDN — no build step). Interactivity via [htmx](https://htmx.org) + `htmx-ext-ws`. Scan progress streams as out-of-band HTML fragments over a WebSocket. Static assets live under `static/` and are served by `tower_http::services::ServeDir`.
+Three independent data sources, all keyed to the same set of discovered repos:
+
+- **Historical** *(past activity, offline, cheap)* — sessions, commits in the last 30 days, LOC churn, unique authors. The bulk of what the dashboard shows.
+- **Current local state** *(working tree right now, offline, cheap)* — untracked + modified file counts, plus a sampled list of paths on the right column. Answers "what have I left lying around?"
+- **Current remote state** *(network call, parallel post-pass, best-effort)* — GitHub Actions status on the default branch via `gh run list`. Failures surface as a prominent pill; a missing or unauthenticated `gh` degrades silently.
+
+Each source gets its own SQLite table. No unified "events" table — cross-source views are a query-time concern. The schema is wiped and rebuilt on every process start, which trades a few seconds of scan time for zero migration code and zero stale-state bugs.
+
+**Sessions.** Each `*.jsonl` under `~/.claude/projects/` is parsed for `sessionId`, first/last timestamps, the first user message (as a 200-char summary), message count, and `cwd`. Malformed lines are skipped with a debug log — the format drifts and I'd rather keep going than bail on one bad record. Sessions join to repos when the session's `cwd` is inside a discovered repo. Other match types (touched file paths, branch names) are the natural extension point.
+
+**Commits.** `git log --all --no-merges` as a subprocess per repo, NUL-separated, capped at `REPO_RECALL_COMMITS_PER_REPO`. Shelling out to system `git` beats libgit2's build pain. Per-repo errors are swallowed at `debug!` — one weird repo doesn't abort the whole scan.
+
+**UI.** Server-rendered HTML via [maud](https://maud.lambda.xyz) (compile-time checked templates), styled with [Tailwind v4](https://tailwindcss.com) loaded from the browser CDN (no build step), interactivity via [htmx](https://htmx.org) + `htmx-ext-ws`. Scan progress streams as out-of-band HTML fragments over a WebSocket — htmx pulls them out by id and swaps them in. No JSON progress protocol, no client JS to speak of.
 
 ## Privacy
 
-- Stores metadata and a truncated 200-char summary only — not full transcripts.
-- Loopback only; the web server never listens on anything but `127.0.0.1`.
-- htmx + Tailwind load from CDNs *in the browser*, not from the server process.
-- The only outbound call from the server itself is `gh run list` for CI status (category: `RemoteState`). It reuses your existing `gh` auth — repo-recall never stores a token, never reads one from env, and degrades silently when `gh` is missing.
+- Stores **metadata + a truncated 200-char summary only** — not full transcripts on disk. The transcript page re-reads the JSONL at request time.
+- Loopback only. Never listens on `0.0.0.0`, never on a shared-box socket.
+- Third-party CDNs (Tailwind, htmx) load *in the browser*, not from the server process.
+- One outbound call: `gh run list` for CI status. Reuses your existing `gh` auth — no tokens stored, no tokens read from env. No `gh`? The CI column stays blank.
 
-The truncated summary can still contain pasted credentials or private text. Treat the cache file as sensitive (it defaults to `$TMPDIR/repo-recall.sqlite`).
+The 200-char summary can still contain pasted credentials or sensitive text. Treat the SQLite cache as sensitive (it defaults to `$TMPDIR/repo-recall.sqlite`, which most OSes wipe on reboot).
 
 ## Scope
 
-MVP deliberately doesn't do git working-tree state, GitHub integration, session transcript rendering, background polling, or a menu-bar companion. See [`SPEC.md`](./SPEC.md) for the full scope, deferred-feature list, and the reasons each one was cut.
+MVP deliberately doesn't do: git working-tree file diffs, full GitHub integration (PRs, issues beyond counts), background polling, a menu-bar companion, or redaction of the session summary. See [`SPEC.md`](./SPEC.md) for the full scope, the deferred-feature list, and the reasons each one was cut.
 
-## Similar tools
+## Prior art
 
-The MVP is narrow — session ↔ repo joining — but [`SPEC.md`](./SPEC.md) scopes a much wider dashboard, and each actually-built or deferred feature already has prior art worth studying.
+The MVP is narrow — session ↔ repo joining — but the full spec is a wider dashboard, and most features have prior art worth studying.
 
 ### Claude Code session browsing
-- **[claude-code-history-viewer](https://github.com/jhlee0409/claude-code-history-viewer)** — desktop app, chat-style transcript rendering, covers Codex / Cursor / Aider / OpenCode in one UI.
-    - *Relevant overlap:* the transcript viewer repo-recall intentionally skipped for MVP.
-- **[claude-devtools](https://github.com/matt1398/claude-devtools)** — "missing DevTools" for Claude Code: visual inspector for tool calls, subagents, token usage, and context window.
-    - *Relevant overlap:* per-session tool-call counts and token footprint columns.
+- **[claude-code-history-viewer](https://github.com/jhlee0409/claude-code-history-viewer)** — desktop app, chat-style transcript rendering, covers Codex / Cursor / Aider / OpenCode too.
+- **[claude-devtools](https://github.com/matt1398/claude-devtools)** — "missing DevTools" for Claude Code: visual inspector for tool calls, subagents, token usage, context window.
 - **[Claudoscope](https://github.com/cordwainersmith/Claudoscope)** — native macOS menu bar with session analytics and cost estimation.
-    - *Relevant overlap:* the menu-bar shape for the deferred companion app.
 
-### Local state + git-aware dashboards (already built: working-tree + CI, deferred: menu bar)
-- **[mgitstatus](https://github.com/fboender/multi-git-status)** — scans N levels deep and prints uncommitted / untracked / unpushed / stashes across every repo.
-    - *Relevant overlap:* the signals we already surface as the "uncommitted work" panel; also validates the depth-limited walk that our scanner does.
-- **[RepoBar](https://github.com/steipete/RepoBar)** — macOS menu bar showing CI, issues, PRs, releases, plus local branch + sync state per pinned repo.
-    - *Relevant overlap:* closest analog to repo-recall's deferred menu bar direction — and it already combines the local + remote signals we're building separately.
+### Git-aware multi-repo dashboards
+- **[mgitstatus](https://github.com/fboender/multi-git-status)** — scans N levels deep; prints uncommitted / untracked / unpushed / stashes per repo. Validates the depth-limited walk.
+- **[RepoBar](https://github.com/steipete/RepoBar)** — macOS menu bar with CI, issues, PRs, releases, branch + sync state. Closest analog to the deferred menu-bar direction.
 
-### Git log analytics (already built: commits / LOC churn / authors)
-- **[Code Maat](https://github.com/adamtornhill/code-maat)** — CLI that mines git logs for churn, author contribution, coupling, and temporal hotspots. Pairs with Tornhill's *Your Code as a Crime Scene*.
-    - *Relevant overlap:* our `loc_churn_30d` + `authors_30d` are primitive forms of what Code Maat does exhaustively; hotspot + file-coupling queries are a natural evolution once we store more per-commit data.
-- **[RepoSense](https://github.com/reposense/RepoSense)** — contribution analysis across a set of repos, with a chronological per-author code breakdown. Originally built for grading student projects.
-    - *Relevant overlap:* the explicit multi-repo framing matches our activity-scored ranking; their per-author timeline is a direction the commits panel could grow into.
-- **[git-quick-stats](https://github.com/arzzen/git-quick-stats)** — interactive Bash CLI that prints ownership / churn / hotspots / branch health for one repo at a time.
-    - *Relevant overlap:* good catalogue of what individual-repo analytics a repo-detail page could grow into without pulling in a heavy dependency.
+### Git log analytics
+- **[Code Maat](https://github.com/adamtornhill/code-maat)** — CLI that mines git logs for churn, contribution, coupling, hotspots. Pairs with Tornhill's *Your Code as a Crime Scene*. Our `loc_churn_30d` + `authors_30d` are primitive forms of what Code Maat does exhaustively.
+- **[RepoSense](https://github.com/reposense/RepoSense)** — cross-repo contribution analysis with per-author timelines. The explicit multi-repo framing matches our activity-scored ranking.
+- **[git-quick-stats](https://github.com/arzzen/git-quick-stats)** — interactive Bash CLI: ownership / churn / hotspots / branch health for one repo at a time.
 
-### Standup / "what did I do" (deferred: recent activity feed)
-- **[git-standup](https://github.com/kamranahmedse/git-standup)** — walks `git log` across nested repos to recall yesterday's work.
-    - *Relevant overlap:* pair its commit scraping with repo-recall's session scraping for a richer recap.
+### "What did I do yesterday?"
+- **[git-standup](https://github.com/kamranahmedse/git-standup)** — walks `git log` across nested repos to recall yesterday's work. Pair its commit scraping with session scraping for a richer recap.
+
 ## Contributing
 
-See [`AGENTS.md`](./AGENTS.md) for conventions and architecture notes — what's a cache vs. a database, how to add new session↔repo match types, why DB access uses `spawn_blocking`, and so on.
+See [`AGENTS.md`](./AGENTS.md) for the conventions — what's a cache vs. a database, how to add new session↔repo match types, why DB access uses `spawn_blocking`, why data sources stay as separate tables, and so on.
