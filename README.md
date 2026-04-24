@@ -25,7 +25,15 @@ Everything is local. The server binds `127.0.0.1` only, the cache lives in `$TMP
 
 ## Point an agent at it
 
-The same endpoints a browser hits are fine for an agent. Boot the server, hand a coding agent the local URL, and ask it to fix the issue — "which repo has failing CI and what changed?", "find the session where I debugged the flaky migration test," "summarise what I left uncommitted across the tree." repo-recall acts as a deterministic data aggregation layer: it does the repo walk, session parse, `git log` shell-outs, working-tree inspection, and CI fetch once, then serves a consistent structured view. The agent reasons over that snapshot instead of re-deriving the same joins with ad-hoc `grep` and `git log` calls every turn, and two agents asked the same question hit the same data.
+The same endpoints a browser hits are fine for an agent. Boot the server, hand a coding agent the local URL, and let it read the dashboard directly. repo-recall acts as a deterministic data aggregation layer: it does the repo walk, session parse, `git log` shell-outs, working-tree inspection, and CI fetch once, then serves a consistent structured view. The agent reasons over that snapshot instead of re-deriving the same joins with ad-hoc `grep` and `git log` calls every turn, and two agents asked the same question hit the same data.
+
+The sweet spot is a broad prompt in auto mode — let the agent work through everything the dashboard flags without you babysitting each one. Copy-paste starters:
+
+- `Open http://127.0.0.1:7777 and work through every repo flagged as action-required. For each one, investigate the cause and resolve it.`
+- `Open http://127.0.0.1:7777. Find every repo with a dirty working tree and either commit or discard the changes, whichever is appropriate per repo.`
+- `Open http://127.0.0.1:7777. Find every repo with failing CI on the default branch, diagnose the failure, and push a fix.`
+- `Open http://127.0.0.1:7777. Review my recent Claude Code sessions and surface any in-progress work I left unfinished across repos.`
+- `Open http://127.0.0.1:7777/repos/<id>. Look at the hottest files by churn and tell me what's driving the thrash.`
 
 ## Quick start
 
