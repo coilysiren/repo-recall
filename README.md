@@ -23,6 +23,10 @@ Everything is local. The server binds `127.0.0.1` only, the cache lives in `$TMP
 
 ![Session page — metadata and transcript](docs/session-detail.png)
 
+## Point an agent at it
+
+The same endpoints a browser hits are fine for an agent. Boot the server, hand a coding agent the local URL, and ask it to fix the issue — "which repo has failing CI and what changed?", "find the session where I debugged the flaky migration test," "summarise what I left uncommitted across the tree." repo-recall acts as a deterministic data aggregation layer: it does the repo walk, session parse, `git log` shell-outs, working-tree inspection, and CI fetch once, then serves a consistent structured view. The agent reasons over that snapshot instead of re-deriving the same joins with ad-hoc `grep` and `git log` calls every turn, and two agents asked the same question hit the same data.
+
 ## Quick start
 
 ```sh
