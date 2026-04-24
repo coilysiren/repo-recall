@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::routes::templates::{
     absolute_time, compact_count, display_name, page, page_with_banners, relative_time, H2, LI,
-    LINK, META, PANEL, PANEL_ALERT, PATH, PILL, PILL_ALERT, PILL_FAINT, ROW,
+    LINK, META, PANEL, PANEL_ALERT, PATH, PILL, PILL_ALERT, PILL_FAINT, ROW, SCAN_STATUS,
 };
 use crate::{activity, db, AppState};
 
@@ -180,8 +180,7 @@ pub async fn index(
 
         (standup_details(&repos, &recent_commits, &recent_sessions, filter_label.as_deref()))
 
-        div id="scan-status" hx-ext="ws" ws-connect="/ws"
-            class="px-3 py-2 bg-[#c9dcd5] border border-[#9e9fc2]/50 rounded text-[#574f7d] text-xs mb-4" {
+        div id="scan-status" hx-ext="ws" ws-connect="/ws" class=(SCAN_STATUS) {
             "waiting for scan status…"
         }
         // dashboard-reload.js opens its own /ws subscription to catch the

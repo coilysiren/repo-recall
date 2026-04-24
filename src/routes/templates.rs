@@ -156,6 +156,11 @@ pub const PILL_FAINT: &str =
      border border-dashed border-[#9e9fc2]/50";
 pub const LINK: &str = "text-[#574f7d] hover:text-[#3e375d] hover:underline";
 pub const PATH: &str = "text-[#574f7d]/60 text-xs break-all font-mono";
+/// Scan-status banner classes. The OOB-swap fragment in `status_fragment`
+/// must include the same class string, otherwise each WS update strips the
+/// styling off the live #scan-status element.
+pub const SCAN_STATUS: &str =
+    "px-3 py-2 bg-[#c9dcd5] border border-[#9e9fc2]/50 rounded text-[#574f7d] text-xs mb-4";
 
 /// Warning banner for missing / unauthenticated `gh`. Full-width strip
 /// between the site header and the main content. Empty markup when `gh` is
