@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let refresh_interval_secs: u64 = std::env::var("REPO_RECALL_REFRESH_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(600);
+        .unwrap_or(150);
     if refresh_interval_secs > 0 {
         tracing::info!("periodic refresh: every {refresh_interval_secs}s");
         let state = state.clone();
