@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "repo-recall",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "REPO_RECALL_CWD=/Users/kai/projects/coilysiren",
+        "REPO_RECALL_PORT=7777",
+        "REPO_RECALL_DEPTH=4",
+        "REPO_RECALL_REFRESH_INTERVAL_SECS=150",
+        "cargo",
+        "run"
+      ],
+      "port": 7777,
+      "url": "/"
+    }
+  ]
+}

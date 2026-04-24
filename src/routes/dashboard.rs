@@ -184,6 +184,10 @@ pub async fn index(
             class="px-3 py-2 bg-[#c9dcd5] border border-[#9e9fc2]/50 rounded text-[#574f7d] text-xs mb-4" {
             "waiting for scan status…"
         }
+        // dashboard-reload.js opens its own /ws subscription to catch the
+        // refresh-complete sentinel and call location.reload(). Scoped to
+        // the dashboard so detail pages don't reload mid-read.
+        script src="/static/dashboard-reload.js" defer {}
 
         @let uncommitted_total: i64 = uncommitted_groups.iter().map(|g| g.total).sum();
         @let uncommitted_panel = if uncommitted_groups.is_empty() { PANEL } else { PANEL_ALERT };

@@ -210,6 +210,16 @@ pub async fn run_refresh(state: AppState) -> anyhow::Result<()> {
         stats.skipped,
     );
     let _ = state.progress_tx.send(status_fragment(&msg));
+    // Sentinel: tells the dashboard's reload observer that fresh data is
+    // available. OOB-swap outerHTML of the hidden #dashboard-reload-sentinel
+    // span so a MutationObserver in dashboard-reload.js sees the
+    // `data-reload-trigger` attribute and fires location.reload(). The span
+    // only exists on the dashboard — detail pages have no swap target, so
+    // they don't reload mid-read.
+    let _ = state.progress_tx.send(
+        r#"<span id="dashboard-reload-sentinel" hx-swap-oob="true" data-reload-trigger="1" style="display:none"></span>"#
+            .to_string(),
+    );
     Ok(())
 }
 
