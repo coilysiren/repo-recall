@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+*.rs     text diff=rust
+*.toml   text
+*.md     text
+*.yml    text
+*.yaml   text
+*.html   text diff=html
+*.css    text diff=css
+*.js     text
+*.sqlite binary

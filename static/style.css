@@ -1,0 +1,46 @@
+/*
+ * repo-recall — small overrides on top of Tailwind.
+ * Palette borrowed from coilysiren.me (Roboto body, mono for technical data).
+ */
+
+:root {
+  --rr-bg: #e0dde5;
+  --rr-panel: #f5f3f9;
+  --rr-accent-bg: #c9dcd5;
+  --rr-border: #9e9fc2;
+  --rr-text: #3e375d;
+  --rr-muted: #574f7d;
+  --rr-faint: #9192bb;
+  --rr-font-body: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --rr-font-mono: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+}
+
+html,
+body {
+  font-family: var(--rr-font-body);
+}
+
+/* Paths, UUIDs, cwds — all dense technical data reads better in monospace. */
+.font-mono,
+pre,
+code,
+kbd,
+samp {
+  font-family: var(--rr-font-mono);
+}
+
+/* Slightly softer scrollbar in the light theme. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--rr-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(158, 159, 194, 0.45);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--rr-muted);
+}
