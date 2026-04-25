@@ -558,10 +558,7 @@ pub struct PrCounts {
 /// over 100 simultaneous PRs, the counts saturate but the dashboard
 /// still functions. Issues use GraphQL `totalCount`, which is exact
 /// regardless of how many open issues a repo has — no client-side cap.
-pub fn fetch_pr_and_issue_counts(
-    owner_repo: &str,
-    my_login: &str,
-) -> Option<(PrCounts, i64)> {
+pub fn fetch_pr_and_issue_counts(owner_repo: &str, my_login: &str) -> Option<(PrCounts, i64)> {
     let (owner, name) = owner_repo.split_once('/')?;
     let query = r#"
         query($owner: String!, $name: String!) {
