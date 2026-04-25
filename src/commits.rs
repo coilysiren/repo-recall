@@ -41,7 +41,8 @@ pub fn scan(repo_path: &Path, limit: usize) -> Result<Vec<CommitRecord>> {
             "--no-merges",
             "-n",
             &limit.to_string(),
-            "--format=%H%x00%at%x00%an%x00%ae%x00%s",
+            "--use-mailmap",
+            "--format=%H%x00%at%x00%aN%x00%aE%x00%s",
         ])
         .output()
         .with_context(|| format!("failed to invoke git in {}", repo_path.display()))?;
