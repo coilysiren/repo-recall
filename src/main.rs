@@ -61,6 +61,10 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(150);
+    let remote_target_limit: usize = std::env::var("REPO_RECALL_REMOTE_TARGET_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(25);
 
     let state = AppState {
         db_path,
@@ -68,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         scan_depth,
         commits_per_repo,
         refresh_interval_secs,
+        remote_target_limit,
         progress_tx,
         refresh_lock: Arc::new(Mutex::new(())),
         last_scan: Arc::new(Mutex::new(None)),

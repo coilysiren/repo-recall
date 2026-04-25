@@ -20,6 +20,11 @@ pub struct AppState {
     /// Seconds between periodic background refreshes. `0` disables the
     /// periodic task; the dashboard hides the countdown in that case.
     pub refresh_interval_secs: u64,
+    /// Cap on how many GitHub-hosted repos get remote-state queries (CI,
+    /// PRs, issues) per refresh — picked as the top-N by most-recent commit
+    /// timestamp. Caps `gh` rate consumption on workspaces that grow past
+    /// the bucket math. `0` means no cap (every GH-hosted repo is queried).
+    pub remote_target_limit: usize,
     pub progress_tx: broadcast::Sender<String>,
     pub refresh_lock: Arc<Mutex<()>>,
     pub last_scan: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,

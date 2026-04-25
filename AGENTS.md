@@ -69,6 +69,7 @@ Environment variables:
 | `REPO_RECALL_DEPTH` | `4`                                        | How many directory levels below cwd to walk before giving up. Raise cautiously — a wide tree can blow up both scan time and the repo count. |
 | `REPO_RECALL_COMMITS_PER_REPO` | `500`                           | How many commits to pull per repo via `git log --all --no-merges`. Higher = longer history at the cost of scan time and DB size. |
 | `REPO_RECALL_REFRESH_INTERVAL_SECS` | `150`                      | How often to auto-refresh in the background. `0` disables. Overlaps with a running refresh no-op via the same lock the `POST /refresh` button uses. |
+| `REPO_RECALL_REMOTE_TARGET_LIMIT` | `25`                         | Max GitHub-hosted repos to query for remote state (CI / PRs / issues) per refresh, picked by most-recent-commit time. Caps `gh` API spend. `0` = no cap. Repos beyond the cap have NULL remote fields until they bubble back into the window. |
 | `REPO_RECALL_DB`    | `$TMPDIR/repo-recall.sqlite`               | SQLite file. Schema is dropped and recreated on every startup.               |
 | `RUST_LOG`          | `info,repo_recall=debug`                   | `tracing-subscriber` filter.                                                 |
 

@@ -31,6 +31,7 @@ async fn boot_with(gh: repo_recall::commits::GhHealth) -> (String, tokio::task::
         scan_depth: 0,
         commits_per_repo: 50,
         refresh_interval_secs: 0,
+        remote_target_limit: 0,
         progress_tx,
         refresh_lock: Arc::new(Mutex::new(())),
         last_scan: Arc::new(Mutex::new(None)),

@@ -545,40 +545,86 @@ pub struct PrCounts {
     pub mine_awaiting_review: i64,
 }
 
-/// Fetch open PRs for a GitHub repo, compute the four counts we care about.
-/// `my_login` is the viewer's GitHub handle (from `gh api user` at startup);
-/// used to partition "awaiting my review" vs. "mine awaiting someone else".
-/// Returns `None` on any gh failure — don't let one repo break the refresh.
-pub fn fetch_pr_counts(owner_repo: &str, my_login: &str) -> Option<PrCounts> {
+/// Fetch PR counts + open-issue total for a GitHub repo in one GraphQL
+/// call. Replaces the previous pair (`gh pr list` + `gh issue list`),
+/// halving the per-repo gh subprocess + API cost on the remote pass.
+///
+/// `my_login` is the viewer's GitHub handle. Empty string is fine — the
+/// reviewer-split fields just stay zero. Returns `None` on any gh failure
+/// (network, auth, parse) so one repo can't break the refresh.
+///
+/// PRs are capped at 100 (GraphQL's hard `first` limit on connection
+/// fields). Plenty of headroom for our usage; if some future repo opens
+/// over 100 simultaneous PRs, the counts saturate but the dashboard
+/// still functions. Issues use GraphQL `totalCount`, which is exact
+/// regardless of how many open issues a repo has — no client-side cap.
+pub fn fetch_pr_and_issue_counts(
+    owner_repo: &str,
+    my_login: &str,
+) -> Option<(PrCounts, i64)> {
+    let (owner, name) = owner_repo.split_once('/')?;
+    let query = r#"
+        query($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) {
+            issues(states: OPEN) { totalCount }
+            pullRequests(first: 100, states: OPEN) {
+              nodes {
+                isDraft
+                author { login }
+                reviewRequests(first: 50) {
+                  nodes {
+                    requestedReviewer {
+                      ... on User { login }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    "#;
     let output = Command::new("gh")
         .args([
-            "pr",
-            "list",
-            "-R",
-            owner_repo,
-            "--state",
-            "open",
-            "--limit",
-            "200",
-            "--json",
-            "number,isDraft,author,reviewRequests",
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={query}"),
+            "-F",
+            &format!("owner={owner}"),
+            "-F",
+            &format!("name={name}"),
         ])
         .output()
         .ok()?;
     if !output.status.success() {
         tracing::debug!(
-            "gh pr list failed for {owner_repo}: {}",
+            "gh api graphql failed for {owner_repo}: {}",
             String::from_utf8_lossy(&output.stderr).trim(),
         );
         return None;
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).ok()?;
+    let body: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    let repo = body.get("data")?.get("repository")?;
+
+    let issues = repo
+        .get("issues")
+        .and_then(|i| i.get("totalCount"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let prs = repo
+        .get("pullRequests")
+        .and_then(|p| p.get("nodes"))
+        .and_then(|n| n.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     let mut counts = PrCounts::default();
     for pr in &prs {
         counts.open += 1;
-        if pr.get("isDraft").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let is_draft = pr.get("isDraft").and_then(|v| v.as_bool()).unwrap_or(false);
+        if is_draft {
             counts.draft += 1;
         }
         let author_login = pr
@@ -588,43 +634,26 @@ pub fn fetch_pr_counts(owner_repo: &str, my_login: &str) -> Option<PrCounts> {
             .unwrap_or("");
         let reviewers: Vec<&str> = pr
             .get("reviewRequests")
-            .and_then(|v| v.as_array())
+            .and_then(|v| v.get("nodes"))
+            .and_then(|n| n.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|r| r.get("login").and_then(|l| l.as_str()))
+                    .filter_map(|r| {
+                        r.get("requestedReviewer")
+                            .and_then(|rr| rr.get("login"))
+                            .and_then(|l| l.as_str())
+                    })
                     .collect()
             })
             .unwrap_or_default();
-
-        if reviewers.contains(&my_login) {
+        if !my_login.is_empty() && reviewers.contains(&my_login) {
             counts.awaiting_my_review += 1;
         }
-        if author_login == my_login && !counts_is_draft(pr) {
+        if !my_login.is_empty() && author_login == my_login && !is_draft {
             counts.mine_awaiting_review += 1;
         }
     }
-    Some(counts)
-}
-
-fn counts_is_draft(pr: &serde_json::Value) -> bool {
-    pr.get("isDraft").and_then(|v| v.as_bool()).unwrap_or(false)
-}
-
-/// Open-issue count for a GitHub repo. Thin wrapper around `gh issue list`.
-pub fn fetch_open_issue_count(owner_repo: &str) -> Option<i64> {
-    let output = Command::new("gh")
-        .args([
-            "issue", "list", "-R", owner_repo, "--state", "open", "--limit", "500", "--json",
-            "number",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issues: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).ok()?;
-    Some(issues.len() as i64)
+    Some((counts, issues))
 }
 
 /// Current viewer's GitHub login via `gh api user --json login`. Called once

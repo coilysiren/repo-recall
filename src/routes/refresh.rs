@@ -303,15 +303,42 @@ async fn ingest_ci_status(state: AppState) -> usize {
     *state.my_gh_login.lock().await = my_login.clone();
     let my_login = my_login.unwrap_or_default();
 
-    // Pull the candidate list off one blocking DB read.
+    // Pull the candidate list off one blocking DB read. Order by most-recent
+    // commit (LEFT JOIN — repos with no commits sort to the bottom) so the
+    // optional `LIMIT` keeps the activity-rich repos and drops dormant ones.
+    // Repos beyond the cap get NULL remote-state fields this cycle; once
+    // they see a fresh commit they bubble back into the window. Acceptable
+    // because the schema is wiped on every refresh anyway, so "no remote
+    // data" is the natural quiet state.
+    let target_limit = state.remote_target_limit;
     let targets = {
         let db_path = state.db_path.clone();
         match tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(i64, String, String)>> {
             let conn = db::open(&db_path)?;
-            let mut stmt = conn.prepare(
-                "SELECT id, remote_url, default_branch FROM repos
-                 WHERE remote_url IS NOT NULL AND default_branch IS NOT NULL",
-            )?;
+            let sql = if target_limit == 0 {
+                "SELECT r.id, r.remote_url, r.default_branch
+                 FROM repos r
+                 LEFT JOIN (
+                     SELECT repo_id, MAX(timestamp) AS latest_ts
+                     FROM commits GROUP BY repo_id
+                 ) c ON c.repo_id = r.id
+                 WHERE r.remote_url IS NOT NULL AND r.default_branch IS NOT NULL
+                 ORDER BY COALESCE(c.latest_ts, 0) DESC"
+                    .to_string()
+            } else {
+                format!(
+                    "SELECT r.id, r.remote_url, r.default_branch
+                     FROM repos r
+                     LEFT JOIN (
+                         SELECT repo_id, MAX(timestamp) AS latest_ts
+                         FROM commits GROUP BY repo_id
+                     ) c ON c.repo_id = r.id
+                     WHERE r.remote_url IS NOT NULL AND r.default_branch IS NOT NULL
+                     ORDER BY COALESCE(c.latest_ts, 0) DESC
+                     LIMIT {target_limit}"
+                )
+            };
+            let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -355,15 +382,14 @@ async fn ingest_ci_status(state: AppState) -> usize {
             let _permit = sem.acquire_owned().await.ok()?;
             // Fan out CI + PRs + issues in one blocking block so the
             // subprocess cost is sequential-per-repo but overlapping across
-            // repos (bounded by the semaphore).
+            // repos (bounded by the semaphore). PRs and issues share one
+            // GraphQL call to halve the per-repo API spend.
             tokio::task::spawn_blocking(move || {
                 let ci = commits::ci_status(&slug, &branch);
-                let prs = if login.is_empty() {
-                    None
-                } else {
-                    commits::fetch_pr_counts(&slug, &login)
+                let (prs, issues) = match commits::fetch_pr_and_issue_counts(&slug, &login) {
+                    Some((p, i)) => (Some(p), Some(i)),
+                    None => (None, None),
                 };
-                let issues = commits::fetch_open_issue_count(&slug);
                 RemoteSnapshot {
                     id,
                     ci,
