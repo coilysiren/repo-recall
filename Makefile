@@ -3,9 +3,11 @@
 .PHONY: help install run watch build release test fmt fmt-check lint check ci clean
 
 # Config ---------------------------------------------------------------------
-cwd   ?= $(CURDIR)
-port  ?= 7777
-depth ?= 4
+# cwd defaults to $REPO_RECALL_CWD if exported, else $(CURDIR). Lets callers
+# do `REPO_RECALL_CWD=$(pwd) make -C repo-recall run` from a parent dir.
+cwd   ?= $(or $(REPO_RECALL_CWD),$(CURDIR))
+port  ?= $(or $(REPO_RECALL_PORT),7777)
+depth ?= $(or $(REPO_RECALL_DEPTH),4)
 
 help: ## Show this help
 	@perl -nle'print $& if m{^[a-zA-Z_-]+:.*?## .*$$}' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
